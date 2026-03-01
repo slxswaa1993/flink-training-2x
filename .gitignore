@@ -1,0 +1,38 @@
+# Build outputs
+**/build/
+**/.gradle/
+**/out/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+.cache/
+
+# Environment / secrets
+.env
+.env.local
+*.env
+
+# Terraform state (keep *.tf but not state files)
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terraform.lock.hcl
+
+# OS
+.DS_Store
+Thumbs.db

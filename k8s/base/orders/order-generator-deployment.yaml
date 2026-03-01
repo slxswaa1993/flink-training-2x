@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-generator
+  namespace: orders
+  labels:
+    app: order-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-generator
+  template:
+    metadata:
+      labels:
+        app: order-generator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      nodeSelector:
+        pool: app
+      containers:
+        - name: order-generator
+          image: REGISTRY/order-generator:latest
+          ports:
+            - containerPort: 8000
+              name: metrics
+          env:
+            - name: EVENTHUB_NAMESPACE
+              valueFrom:
+                secretKeyRef:
+                  name: eventhub-secrets
+                  key: namespace
+            - name: EVENTHUB_CONN_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: eventhub-secrets
+                  key: connection-string
+            - name: ORDERS_PER_SECOND
+              value: "10"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30

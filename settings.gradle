@@ -1,0 +1,21 @@
+rootProject.name = 'flink-training-2x'
+
+// Phase 1-2: Foundation exercises
+include 'common'
+include 'ride-cleansing'
+include 'rides-and-fares'
+include 'hourly-tips'
+include 'long-ride-alerts'
+
+// Phase 3: Stateful Processing & Advanced Windows
+include 'session-analytics'
+
+// Phase 4: Table API & Flink SQL
+include 'sql-dashboard'
+
+// Phase 5: Production Patterns
+include 'cdc-pipeline'
+include 'stream-join'
+
+// Phase 6: Advanced Topics
+include 'exactly-once'

@@ -1,0 +1,47 @@
+# Docker Compose for Flink Session Analytics in Application Mode
+#
+# Application Mode: The job runs in the JobManager, providing resource isolation
+# and simplified deployment - one cluster per job.
+#
+# Usage:
+#   1. Build the fat JAR:  ./gradlew :session-analytics:shadowJar
+#   2. Build Docker image: docker compose build
+#   3. Start the cluster:  docker compose up
+#   4. View Flink UI:      http://localhost:8081
+#   5. View TaskManager logs in Web UI: TaskManagers -> select TM -> Logs tab
+#   6. Stop:               docker compose down
+
+services:
+  jobmanager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: session-analytics-jobmanager
+    ports:
+      - "8082:8081"  # Flink Web UI (mapped to 8082 to avoid conflict with local Flink)
+    command: standalone-job --job-classname org.apache.flink.training.exercises.sessionanalytics.SessionAnalyticsExercise
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        parallelism.default: 2
+        state.backend.type: hashmap
+        execution.checkpointing.interval: 10s
+        web.log.path: /opt/flink/log
+
+  taskmanager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: session-analytics-taskmanager
+    depends_on:
+      - jobmanager
+    command: taskmanager
+    scale: 1
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        parallelism.default: 2
+        web.log.path: /opt/flink/log

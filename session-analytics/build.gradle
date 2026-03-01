@@ -1,0 +1,27 @@
+// Phase 3.2: Session Window Analytics
+// Learn session windows, late event handling, and side outputs
+
+plugins {
+    id 'application'
+}
+
+description = "Session Window Analytics Exercise"
+
+application {
+    mainClass = 'org.apache.flink.training.exercises.sessionanalytics.SessionAnalyticsExercise'
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': 'org.apache.flink.training.exercises.sessionanalytics.SessionAnalyticsExercise'
+    }
+}
+
+shadowJar {
+    archiveBaseName.set('session-analytics')
+    archiveClassifier.set('all')
+    archiveVersion.set('')
+    manifest {
+        attributes 'Main-Class': 'org.apache.flink.training.exercises.sessionanalytics.SessionAnalyticsExercise'
+    }
+}

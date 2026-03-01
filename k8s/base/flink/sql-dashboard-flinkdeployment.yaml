@@ -1,0 +1,50 @@
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: sql-dashboard
+  namespace: flink
+spec:
+  flinkVersion: v2_0
+  image: REGISTRY/flink-sql-dashboard:latest
+  imagePullPolicy: Always
+  serviceAccount: flink
+  mode: Application
+  jobManager:
+    replicas: 1
+    resource:
+      memory: "2048m"
+      cpu: 1
+  taskManager:
+    replicas: 3
+    resource:
+      memory: "4096m"
+      cpu: 2
+  flinkConfiguration:
+    state.checkpoints.dir: "abfs://flink-state@prodeus2ordersstorage.dfs.core.windows.net/checkpoints"
+    state.savepoints.dir: "abfs://flink-state@prodeus2ordersstorage.dfs.core.windows.net/savepoints"
+    execution.checkpointing.interval: "60s"
+    execution.checkpointing.mode: EXACTLY_ONCE
+    kubernetes.taskmanager.node-selector: "pool=flink"
+    taskmanager.numberOfTaskSlots: "2"
+    parallelism.default: "6"
+  podTemplate:
+    spec:
+      containers:
+        - name: flink-main-container
+          env:
+            - name: EVENTHUB_NAMESPACE
+              valueFrom:
+                secretKeyRef:
+                  name: eventhub-secrets
+                  key: namespace
+            - name: EVENTHUB_CONN_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: eventhub-secrets
+                  key: connection-string
+  job:
+    jarURI: local:///opt/flink/usrlib/sql-dashboard-production.jar
+    entryClass: org.apache.flink.training.exercises.sqldashboard.production.SqlDashboardJob
+    parallelism: 6
+    upgradeMode: savepoint
+    state: running

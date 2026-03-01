@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard-backend
+  namespace: orders
+  labels:
+    app: dashboard-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dashboard-backend
+  template:
+    metadata:
+      labels:
+        app: dashboard-backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      nodeSelector:
+        pool: app
+      containers:
+        - name: dashboard-backend
+          image: REGISTRY/dashboard-backend:latest
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: EVENTHUB_NAMESPACE
+              valueFrom:
+                secretKeyRef:
+                  name: eventhub-secrets
+                  key: namespace
+            - name: EVENTHUB_CONN_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: eventhub-secrets
+                  key: connection-string
+            - name: TIMESCALE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-secrets
+                  key: dsn
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10

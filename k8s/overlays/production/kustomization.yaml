@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/orders
+  - ../../base/flink
+
+images:
+  - name: REGISTRY/order-generator
+    newName: prodeus2ordersacr.azurecr.io/order-generator
+    newTag: latest
+  - name: REGISTRY/dashboard-backend
+    newName: prodeus2ordersacr.azurecr.io/dashboard-backend
+    newTag: latest
+  - name: REGISTRY/dashboard-frontend
+    newName: prodeus2ordersacr.azurecr.io/dashboard-frontend
+    newTag: latest
+  - name: REGISTRY/flink-sql-dashboard
+    newName: prodeus2ordersacr.azurecr.io/flink-sql-dashboard
+    newTag: latest
+
+patches:
+  - target:
+      kind: Ingress
+      name: orders-ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: orders.yourdomain.com
+      - op: replace
+        path: /spec/rules/1/host
+        value: api.orders.yourdomain.com

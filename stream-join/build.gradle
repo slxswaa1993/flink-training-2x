@@ -1,0 +1,18 @@
+// Phase 5.2: Multi-Stream Join & Enrichment
+// Learn stream-stream joins, temporal joins, and broadcast state pattern
+
+plugins {
+    id 'application'
+}
+
+description = "Multi-Stream Join Exercise"
+
+application {
+    mainClass = 'org.apache.flink.training.exercises.streamjoin.StreamJoinExercise'
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': 'org.apache.flink.training.exercises.streamjoin.StreamJoinExercise'
+    }
+}

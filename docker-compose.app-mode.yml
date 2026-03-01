@@ -1,0 +1,39 @@
+# Flink Application Mode
+# The job runs as part of the cluster - starts, runs, and exits together
+#
+# Usage:
+#   docker-compose -f docker-compose.app-mode.yml up
+#
+# To run a different job, override the environment:
+#   JOB_CLASS=org.apache.flink.training.exercises.ridesandfares.RidesAndFaresSolution \
+#   JAR_FILE=rides-and-fares-2.0-SNAPSHOT-all.jar \
+#   docker-compose -f docker-compose.app-mode.yml up
+
+services:
+  jobmanager:
+    image: flink:1.20-java17
+    container_name: flink-app-jobmanager
+    ports:
+      - "8082:8081"
+    command: standalone-job --job-classname ${JOB_CLASS:-org.apache.flink.training.exercises.ridecleansing.RideCleansingSolution}
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        parallelism.default: 2
+    volumes:
+      - ./jars/${JAR_FILE:-ride-cleansing-2.0-SNAPSHOT-all.jar}:/opt/flink/usrlib/job.jar
+
+  taskmanager:
+    image: flink:1.20-java17
+    container_name: flink-app-taskmanager
+    depends_on:
+      - jobmanager
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 4
+    volumes:
+      - ./jars/${JAR_FILE:-ride-cleansing-2.0-SNAPSHOT-all.jar}:/opt/flink/usrlib/job.jar

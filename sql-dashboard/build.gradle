@@ -1,0 +1,35 @@
+// Phase 4.2: Real-Time Dashboard with Flink SQL
+// Learn Table API, Flink SQL, and real-time analytics
+
+plugins {
+    id 'application'
+}
+
+description = "Real-Time Dashboard with Flink SQL Exercise"
+
+application {
+    mainClass = 'org.apache.flink.training.exercises.sqldashboard.SqlDashboardExercise'
+}
+
+dependencies {
+    // Flink Table API dependencies
+    implementation "org.apache.flink:flink-table-api-java-bridge:${flinkVersion}"
+    implementation "org.apache.flink:flink-table-planner-loader:${flinkVersion}"
+    implementation "org.apache.flink:flink-table-runtime:${flinkVersion}"
+    // Kafka connector for production deployment
+    implementation "org.apache.flink:flink-connector-kafka:3.3.0-2.0"
+    implementation "org.apache.flink:flink-json:${flinkVersion}"
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': 'org.apache.flink.training.exercises.sqldashboard.SqlDashboardExercise'
+    }
+}
+
+shadowJar {
+    manifest {
+        attributes 'Main-Class': 'org.apache.flink.training.exercises.sqldashboard.production.SqlDashboardJob'
+    }
+    archiveClassifier.set('production')
+}

@@ -1,0 +1,28 @@
+// Phase 5.1: CDC Pipeline with Flink CDC
+// Learn Change Data Capture patterns and database synchronization
+
+plugins {
+    id 'application'
+}
+
+description = "CDC Pipeline Exercise"
+
+application {
+    mainClass = 'org.apache.flink.training.exercises.cdcpipeline.CdcPipelineExercise'
+}
+
+dependencies {
+    // Flink Table API for CDC
+    implementation "org.apache.flink:flink-table-api-java-bridge:${flinkVersion}"
+    implementation "org.apache.flink:flink-table-planner-loader:${flinkVersion}"
+    implementation "org.apache.flink:flink-table-runtime:${flinkVersion}"
+
+    // Note: In production, add flink-connector-mysql-cdc
+    // implementation "com.ververica:flink-connector-mysql-cdc:3.0.0"
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': 'org.apache.flink.training.exercises.cdcpipeline.CdcPipelineExercise'
+    }
+}

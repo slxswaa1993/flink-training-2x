@@ -1,0 +1,91 @@
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '8.1.1' apply false
+}
+
+description = "Flink Training Exercises (Flink 2.x Compatible)"
+
+allprojects {
+    group = 'org.apache.flink'
+    version = '2.0-SNAPSHOT'
+}
+
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'com.github.johnrengelman.shadow'
+
+    ext {
+        javaVersion = '17'
+        flinkVersion = '2.0.0'
+        log4jVersion = '2.20.0'
+        junitVersion = '5.10.0'
+    }
+
+    java {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    tasks.withType(JavaCompile) {
+        options.encoding = 'UTF-8'
+    }
+
+    repositories {
+        mavenCentral()
+        maven {
+            url "https://repository.apache.org/content/repositories/snapshots/"
+            mavenContent {
+                snapshotsOnly()
+            }
+        }
+    }
+
+    dependencies {
+        // Logging
+        implementation "org.slf4j:slf4j-api:2.0.9"
+        implementation "org.apache.logging.log4j:log4j-slf4j2-impl:${log4jVersion}"
+        implementation "org.apache.logging.log4j:log4j-api:${log4jVersion}"
+        implementation "org.apache.logging.log4j:log4j-core:${log4jVersion}"
+
+        // Flink dependencies
+        implementation "org.apache.flink:flink-streaming-java:${flinkVersion}"
+        implementation "org.apache.flink:flink-clients:${flinkVersion}"
+        implementation "org.apache.flink:flink-connector-datagen:${flinkVersion}"
+
+        // For web UI during IDE development
+        implementation "org.apache.flink:flink-runtime-web:${flinkVersion}"
+
+        // Testing
+        testImplementation "org.apache.flink:flink-test-utils:${flinkVersion}"
+        testImplementation "org.junit.jupiter:junit-jupiter:${junitVersion}"
+
+        // Common module dependency
+        if (project != project(":common")) {
+            implementation project(path: ':common')
+            testImplementation project(path: ':common')
+        }
+    }
+
+    shadowJar {
+        mergeServiceFiles()
+        dependencies {
+            exclude(dependency("org.apache.flink:force-shading"))
+            exclude(dependency('com.google.code.findbugs:jsr305'))
+            // Keep slf4j for standalone execution
+            // exclude(dependency('org.slf4j:.*'))
+        }
+    }
+
+    test {
+        useJUnitPlatform()
+    }
+
+    jar {
+        manifest {
+            attributes 'Built-By': System.getProperty('user.name'),
+                    'Build-Jdk': System.getProperty('java.version')
+        }
+    }
+
+    assemble.dependsOn(shadowJar)
+}
