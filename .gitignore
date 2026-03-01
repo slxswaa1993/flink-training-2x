@@ -2,6 +2,8 @@
 **/build/
 **/.gradle/
 **/out/
+**/bin/
+jars/
 
 # IDE
 .idea/
