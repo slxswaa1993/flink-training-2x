@@ -19,7 +19,7 @@ variable "location_short" {
 variable "kubernetes_version" {
   description = "AKS Kubernetes version"
   type        = string
-  default     = "1.31"
+  default     = "1.33"
 }
 
 variable "eventhub_capacity" {
