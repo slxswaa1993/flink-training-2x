@@ -7,7 +7,7 @@ resource "azurerm_container_registry" "main" {
 
   network_rule_set {
     default_action = "Deny"
-    virtual_network {
+    virtual_network_rule {
       action    = "Allow"
       subnet_id = azurerm_subnet.aks.id
     }

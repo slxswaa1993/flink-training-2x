@@ -60,7 +60,7 @@ resource "azurerm_kubernetes_cluster_node_pool" "flink" {
   kubernetes_cluster_id = azurerm_kubernetes_cluster.main.id
   vm_size               = "Standard_D4s_v3"
   vnet_subnet_id        = azurerm_subnet.aks.id
-  enable_auto_scaling   = true
+  auto_scaling_enabled  = true
   min_count             = var.flink_node_count_min
   max_count             = var.flink_node_count_max
   node_labels = {
@@ -74,7 +74,7 @@ resource "azurerm_kubernetes_cluster_node_pool" "app" {
   kubernetes_cluster_id = azurerm_kubernetes_cluster.main.id
   vm_size               = "Standard_D2s_v3"
   vnet_subnet_id        = azurerm_subnet.aks.id
-  enable_auto_scaling   = true
+  auto_scaling_enabled  = true
   min_count             = var.app_node_count_min
   max_count             = var.app_node_count_max
   node_labels = {
