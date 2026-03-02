@@ -11,6 +11,7 @@ resource "azurerm_subnet" "aks" {
   resource_group_name  = azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.main.name
   address_prefixes     = ["10.0.0.0/20"]
+  service_endpoints    = ["Microsoft.KeyVault", "Microsoft.ContainerRegistry", "Microsoft.EventHub"]
 }
 
 resource "azurerm_subnet" "private_endpoints" {
