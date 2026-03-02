@@ -5,14 +5,6 @@ resource "azurerm_container_registry" "main" {
   sku                 = "Premium"
   admin_enabled       = false
 
-  network_rule_set {
-    default_action = "Deny"
-    virtual_network_rule {
-      action    = "Allow"
-      subnet_id = azurerm_subnet.aks.id
-    }
-  }
-
   tags = local.tags
 }
 
