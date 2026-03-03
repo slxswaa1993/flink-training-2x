@@ -446,14 +446,244 @@ kubectl get flinkdeployment -n flink
 
 ---
 
-## CI/CD Workflows
+## Application Services
 
-| Workflow | Trigger | Actions |
-|---|---|---|
-| `pr-checks.yml` | Pull request | Python lint, Next.js build, `terraform plan` |
-| `build-and-push.yml` | Push to `main` | Build 4 Docker images → ACR |
-| `deploy-app.yml` | After build | `kubectl apply -k` + patch FlinkDeployment image |
-| `deploy-infrastructure.yml` | Manual / infra file change | `terraform apply` |
+Three services run alongside the Flink job in the `orders` namespace:
+
+### Order Generator (`services/order-generator/`)
+
+Python service that produces synthetic orders to Event Hubs at ~10 orders/sec.
+
+- **Language**: Python 3.12 + `confluent-kafka`
+- **Realistic patterns**: sinusoidal time-of-day rate (morning/evening peaks), regional
+  weighting (NA 35%, EU 25%, APAC 25%, other 15%), random 3× burst spikes every ~10 min
+- **Connects to**: Event Hubs topic `orders-raw` via SASL_SSL + `$ConnectionString`
+- **Config**: `EVENTHUB_NAMESPACE` and `EVENTHUB_CONN_STRING` from Key Vault (same secrets as Flink job)
+
+### Dashboard Backend (`services/dashboard-backend/`)
+
+FastAPI service that bridges Event Hubs → TimescaleDB → browser.
+
+- **Language**: Python 3.12, FastAPI 0.115, `aiokafka`, `asyncpg`
+- **Data flow**: `aiokafka` consumer reads all 4 output topics → asyncio queue → fan-out to
+  WebSocket clients + insert rows into TimescaleDB hypertables
+- **REST API** (historical data):
+
+  | Endpoint | Description |
+  |---|---|
+  | `GET /api/analytics/region?minutes=30` | Orders by region, last N minutes |
+  | `GET /api/analytics/products?minutes=30` | Top products history |
+  | `GET /api/analytics/category?minutes=30` | Revenue by category |
+  | `GET /api/analytics/alerts?limit=50` | Recent high-value alerts |
+  | `GET /health` | Liveness / readiness probe |
+  | `GET /metrics` | Prometheus metrics |
+
+- **WebSocket**: `WS /ws/stream` — all 4 topics multiplexed, pushed live to connected browsers
+
+### Dashboard Frontend (`services/dashboard-frontend/`)
+
+Next.js 14 app with a 2×2 panel grid of live-updating charts.
+
+- **Stack**: Next.js 14 (App Router), TypeScript, Tailwind CSS, ECharts, SWR
+- **Layout**:
+  ```
+  ┌──────────────────────┬──────────────────────┐
+  │  Orders by Region    │  Top 3 Products       │
+  │  Stacked bar chart   │  Horizontal bar       │
+  ├──────────────────────┼──────────────────────┤
+  │  Revenue by Category │  High-Value Alerts    │
+  │  Multi-line chart    │  Scrolling table      │
+  └──────────────────────┴──────────────────────┘
+  ```
+- **Initial load**: SWR fetches REST endpoints for historical data
+- **Live updates**: WebSocket connects to `/ws/stream`, reconnects automatically on drop
+- **Why ECharts over Recharts**: Canvas-based rendering handles high-frequency WebSocket
+  updates without React reconciler bottleneck
+
+---
+
+## Secrets Flow
+
+No secrets are stored in Git or Kubernetes YAML. The full chain:
+
+```
+Azure Key Vault (prod-eus2-orders-kv)
+  ├─ eventhub-conn-string  "Endpoint=sb://prodeus2ordersehns..."
+  └─ eventhub-namespace    "prodeus2ordersehns"
+          │
+          │  Key Vault CSI Driver (AKS add-on, enabled via Terraform)
+          │  SecretProviderClass: k8s/base/orders/secret-provider-class.yaml
+          ▼
+  Kubernetes Secret: eventhub-secrets  (in flink + orders namespaces)
+    ├─ key: connection-string
+    └─ key: namespace
+          │
+          │  envFrom / secretKeyRef in pod spec
+          ▼
+  Pod environment variables
+    ├─ EVENTHUB_CONN_STRING
+    └─ EVENTHUB_NAMESPACE
+          │
+          │  JobConfig.java / config.py reads at startup
+          ▼
+  Kafka SASL_SSL connection to Event Hubs
+```
+
+The AKS kubelet identity is granted **Key Vault Secrets User** role by Terraform,
+so pods can pull secrets without any credentials in their YAML.
+
+---
+
+## Docker Images
+
+Four images are built and stored in ACR. Each gets two tags on every build:
+- `:<git-sha>` — immutable, used for deployments (enables precise rollbacks)
+- `:latest` — floating, for convenience
+
+| Image | Source | Dockerfile | Main class / entrypoint |
+|---|---|---|---|
+| `flink-sql-dashboard` | `sql-dashboard/` | `infra/docker/flink-job/Dockerfile` | `SqlDashboardJob` (fat JAR via `shadowJar`) |
+| `order-generator` | `services/order-generator/` | `infra/docker/order-generator/Dockerfile` | `python main.py` |
+| `dashboard-backend` | `services/dashboard-backend/` | `infra/docker/dashboard-backend/Dockerfile` | `uvicorn app.main:app` |
+| `dashboard-frontend` | `services/dashboard-frontend/` | `infra/docker/dashboard-frontend/Dockerfile` | `nginx` serving Next.js static export |
+
+Build cache is stored in ACR itself (`type=registry` cache) — subsequent builds only
+rebuild changed layers, keeping CI times fast.
+
+---
+
+## CI/CD Pipelines
+
+### Authentication — how all pipelines connect to Azure
+
+All 4 workflows use **OIDC Federated Identity** — no client secrets stored anywhere.
+GitHub generates a short-lived JWT for each run; Azure exchanges it for an access token:
+
+```yaml
+- uses: azure/login@v2
+  with:
+    client-id: ${{ secrets.AZURE_CLIENT_ID }}       # 36fe3826-38e4-42c9-a80a-37e294e8a8a7
+    tenant-id: ${{ secrets.AZURE_TENANT_ID }}       # 86a61b1c-2773-4d47-af70-25ff6096d6fe
+    subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+```
+
+Federated credentials on the SP restrict auth to: pushes to `main` and pull requests
+on `slxswaa1993/flink-training-2x` only.
+
+---
+
+### 1. `pr-checks.yml` — Safety gate on every PR
+
+**Trigger**: any Pull Request targeting `main`
+
+Runs 3 jobs in parallel — the PR cannot be merged if any fail:
+
+```
+PR opened
+  ├─ python-lint (matrix: order-generator + dashboard-backend)
+  │    ruff check + mypy type check
+  │
+  ├─ frontend-build
+  │    npm ci + next build  (catches TypeScript / import errors)
+  │
+  └─ terraform-plan
+       terraform init + plan -no-color
+       uploads tfplan as a workflow artifact for review
+       (uses 'staging' environment for OIDC)
+```
+
+Nothing is deployed. Output: pass/fail on the PR status checks.
+
+---
+
+### 2. `build-and-push.yml` — Build all Docker images
+
+**Trigger**: push to `main`, or manual dispatch (`workflow_dispatch`)
+
+Runs 4 parallel jobs via a build matrix — one per image:
+
+```
+push to main
+  ├─ Build flink-sql-dashboard   → prodeus2ordersacr.azurecr.io/flink-sql-dashboard:<sha> + :latest
+  ├─ Build order-generator       → prodeus2ordersacr.azurecr.io/order-generator:<sha> + :latest
+  ├─ Build dashboard-backend     → prodeus2ordersacr.azurecr.io/dashboard-backend:<sha> + :latest
+  └─ Build dashboard-frontend    → prodeus2ordersacr.azurecr.io/dashboard-frontend:<sha> + :latest
+```
+
+Each job: `az login (OIDC)` → `az acr login` → `docker buildx build --push`
+
+Cache strategy: `cache-from/cache-to type=registry` stores Docker layer cache in ACR,
+so only changed layers are rebuilt on subsequent runs.
+
+---
+
+### 3. `deploy-app.yml` — Deploy to AKS
+
+**Trigger**: automatically when `build-and-push.yml` completes successfully on `main`;
+or manually via `workflow_dispatch` (lets you specify any image tag)
+
+```
+build-and-push succeeded
+  │
+  ▼
+1. az login (OIDC)
+2. az aks get-credentials  →  kubectl access to prod-eus2-orders-aks
+3. kubectl apply -k k8s/overlays/production --server-side
+       applies all manifests: Deployments, StatefulSet, Services,
+       HPAs, Ingress, SecretProviderClass, FlinkDeployment
+4. kubectl set image  →  patch order-generator / backend / frontend to :<git-sha>
+5. kubectl patch flinkdeployment sql-dashboard  →  patch to :<git-sha>
+       (triggers Flink Operator savepoint upgrade — no data loss)
+6. kubectl rollout status  →  waits up to 5 min for pods to go healthy
+7. kubectl get pods -n orders + get flinkdeployment -n flink  →  final status print
+```
+
+The `if:` condition ensures this job **only runs if the build succeeded** —
+a broken image build never reaches the cluster.
+
+**Manual trigger** (useful for rolling back or redeploying a specific SHA):
+```
+GitHub → Actions → Deploy Application → Run workflow → image_tag: <sha>
+```
+
+---
+
+### 4. `deploy-infrastructure.yml` — Terraform
+
+**Trigger**: push to `main` that changes `infra/terraform/**` (auto-apply), or
+manual dispatch where you choose `plan` or `apply`
+
+```
+infra/terraform/** changed (or manual trigger)
+  │
+  ▼
+terraform init    →  connects to blob state (prodeus2orderstfstate / tfstate)
+terraform plan    →  always runs, shows what will change
+terraform apply   →  only if: action=apply OR push to main
+terraform output  →  prints resource values after apply
+```
+
+Uses `production` environment for apply (requires OIDC credential with Contributor +
+User Access Administrator roles), `staging` environment for plan-only runs.
+
+---
+
+### End-to-end flow
+
+```
+Developer opens PR
+        │
+        └─ pr-checks.yml  (lint + build check + tf plan)  ← blocks merge if failing
+                │
+Developer merges to main
+        │
+        ├─ build-and-push.yml  →  4 images → ACR
+        │         │
+        │         └─ (on success) deploy-app.yml  →  AKS rolling deploy
+        │
+        └─ (only if infra/terraform/** changed)
+           deploy-infrastructure.yml  →  terraform apply
+```
 
 ---
 
@@ -473,6 +703,93 @@ kubectl get flinkdeployment -n flink
 **Grafana dashboards** in `k8s/monitoring/grafana-dashboards/`:
 - `flink-health.json` — job status, checkpoint duration, backpressure
 - `order-analytics.json` — business KPIs (revenue, top products, alert frequency)
+
+---
+
+## Day-2 Operations
+
+### Check what's running
+
+```bash
+# All pods across the system
+kubectl get pods -n orders
+kubectl get pods -n flink
+kubectl get pods -n flink-operator
+kubectl get pods -n monitoring
+
+# Flink job status  (look for STABLE / RUNNING)
+kubectl get flinkdeployment -n flink
+
+# Ingress public IP
+kubectl get svc ingress-nginx-controller -n ingress-nginx
+```
+
+### Tail logs
+
+```bash
+# Flink JobManager
+kubectl logs -n flink -l component=jobmanager -f
+
+# Order generator
+kubectl logs -n orders -l app=order-generator -f
+
+# Dashboard backend
+kubectl logs -n orders -l app=dashboard-backend -f
+```
+
+### Redeploy a specific image SHA (rollback)
+
+```bash
+# Go to GitHub Actions → Deploy Application → Run workflow → enter the old SHA
+# Or manually:
+kubectl set image deployment/dashboard-backend \
+  dashboard-backend=prodeus2ordersacr.azurecr.io/dashboard-backend:<old-sha> -n orders
+
+kubectl patch flinkdeployment sql-dashboard -n flink \
+  --type json \
+  -p '[{"op":"replace","path":"/spec/image","value":"prodeus2ordersacr.azurecr.io/flink-sql-dashboard:<old-sha>"}]'
+```
+
+### Take a Flink savepoint manually
+
+```bash
+# Trigger savepoint (Flink Operator handles this)
+kubectl annotate flinkdeployment sql-dashboard -n flink \
+  flink.apache.org/savepoint-trigger-nonce=$(date +%s)
+
+# Check savepoint path in status
+kubectl get flinkdeployment sql-dashboard -n flink -o jsonpath='{.status.jobStatus.savepointInfo}'
+```
+
+### Scale node pools
+
+```bash
+# Temporarily scale up Flink nodes (e.g. for a big backlog)
+az aks nodepool update \
+  --cluster-name prod-eus2-orders-aks \
+  --resource-group prod-eus2-orders-rg \
+  --name flink \
+  --min-count 3 --max-count 8
+```
+
+### Access Grafana
+
+```bash
+kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80 -n monitoring
+# http://localhost:3000   admin / admin123
+```
+
+### Rotate the Event Hubs connection string
+
+1. Regenerate the SAS key in Azure Portal → Event Hubs → `prodeus2ordersehns` → Shared access policies
+2. Update the Key Vault secret: `az keyvault secret set --vault-name prod-eus2-orders-kv --name eventhub-conn-string --value "<new-string>"`
+3. Restart pods so the CSI driver picks up the new value:
+   ```bash
+   kubectl rollout restart deployment/order-generator -n orders
+   kubectl rollout restart deployment/dashboard-backend -n orders
+   kubectl patch flinkdeployment sql-dashboard -n flink \
+     --type merge -p '{"spec":{"restartNonce":"'$(date +%s)'"}}'
+   ```
 
 ---
 
