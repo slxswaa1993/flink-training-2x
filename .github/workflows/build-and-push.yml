@@ -17,6 +17,7 @@ jobs:
     name: Build ${{ matrix.service }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - service: order-generator
@@ -32,7 +33,7 @@ jobs:
             dockerfile: infra/docker/dashboard-frontend/Dockerfile
             image: dashboard-frontend
           - service: flink-sql-dashboard
-            context: sql-dashboard
+            context: .
             dockerfile: infra/docker/flink-job/Dockerfile
             image: flink-sql-dashboard
 
