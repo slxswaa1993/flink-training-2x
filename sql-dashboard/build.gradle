@@ -17,7 +17,7 @@ dependencies {
     implementation "org.apache.flink:flink-table-planner-loader:${flinkVersion}"
     implementation "org.apache.flink:flink-table-runtime:${flinkVersion}"
     // Kafka connector for production deployment
-    implementation "org.apache.flink:flink-connector-kafka:3.3.0-2.0"
+    implementation "org.apache.flink:flink-connector-kafka:4.0.1-2.0"
     implementation "org.apache.flink:flink-json:${flinkVersion}"
 }
 

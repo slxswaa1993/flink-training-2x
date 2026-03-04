@@ -29,16 +29,16 @@ export default function Dashboard() {
   const handleMessage = useCallback((msg: WsMessage) => {
     switch (msg.topic) {
       case 'orders-by-region':
-        setLiveRegion((prev) => [msg.data as RegionStat, ...prev].slice(0, 200))
+        setLiveRegion((prev) => [msg.data as unknown as RegionStat, ...prev].slice(0, 200))
         break
       case 'top-products':
-        setLiveProducts((prev) => [msg.data as TopProduct, ...prev].slice(0, 100))
+        setLiveProducts((prev) => [msg.data as unknown as TopProduct, ...prev].slice(0, 100))
         break
       case 'revenue-by-category':
-        setLiveCategory((prev) => [msg.data as CategoryRevenue, ...prev].slice(0, 200))
+        setLiveCategory((prev) => [msg.data as unknown as CategoryRevenue, ...prev].slice(0, 200))
         break
       case 'high-value-alerts':
-        setLiveAlerts((prev) => [msg.data as Alert, ...prev].slice(0, 50))
+        setLiveAlerts((prev) => [msg.data as unknown as Alert, ...prev].slice(0, 50))
         break
     }
   }, [])
