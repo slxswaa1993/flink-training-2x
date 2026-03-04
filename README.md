@@ -687,22 +687,334 @@ Developer merges to main
 
 ---
 
-## Monitoring & Alerts
+## Monitoring & Observability
 
-**Prometheus rules** (`k8s/monitoring/prometheus-rules.yaml`):
+The system has two monitoring layers:
 
-| Alert | Condition | Severity |
+1. **In-cluster**: Prometheus + Grafana + Alertmanager (via `kube-prometheus-stack` Helm chart)
+2. **Cloud-native**: Azure Monitor + Log Analytics (via Terraform `monitoring.tf`)
+
+```
+Azure Monitor (AKS diagnostics, Event Hub metrics, Log Analytics)
+        │
+    AKS Cluster
+     ┌──┴──────────────────────────────────────────────┐
+     │  monitoring namespace                           │
+     │   Prometheus ──► Grafana     Alertmanager       │
+     │       │ scrape /metrics          │ alerts       │
+     │  ┌────┴──────────┐         ┌────┴──────────┐   │
+     │  │ flink ns      │         │ Slack         │   │
+     │  │  JM + TM ×3   │         │ PagerDuty     │   │
+     │  └───────────────┘         │ Email         │   │
+     │  ┌───────────────┐         └───────────────┘   │
+     │  │ orders ns     │                             │
+     │  │  all services │                             │
+     │  └───────────────┘                             │
+     └─────────────────────────────────────────────────┘
+```
+
+### Accessing Monitoring Tools
+
+```bash
+# Grafana — dashboards & visualization
+kubectl port-forward svc/kube-prometheus-stack-grafana -n monitoring 3000:80
+# http://localhost:3000  admin / admin123
+
+# Prometheus — raw metrics & PromQL
+kubectl port-forward svc/kube-prometheus-stack-prometheus -n monitoring 9090:9090
+# http://localhost:9090
+
+# Alertmanager — alert routing & silencing
+kubectl port-forward svc/kube-prometheus-stack-alertmanager -n monitoring 9093:9093
+# http://localhost:9093
+
+# Flink Web UI — job graph, backpressure, checkpoints
+kubectl port-forward svc/sql-dashboard-rest -n flink 8081:8081
+# http://localhost:8081
+
+# Azure Portal — Log Analytics, AKS Insights, Event Hub Metrics
+# portal.azure.com → prod-eus2-orders-rg → each resource → Monitoring
+```
+
+### What to Monitor
+
+#### Pillar 1: Flink Job Health (Most Critical)
+
+| Metric | Source | What it Tells You | Alert Threshold |
+|---|---|---|---|
+| Job status | `flink_jobmanager_job_uptime` | Is the job running? | == 0 for 2min → CRITICAL |
+| Checkpoint duration | `flink_jobmanager_job_lastCheckpointDuration` | How long checkpoints take | > 60s → investigate |
+| Checkpoint failures | `flink_jobmanager_job_numberOfFailedCheckpoints` | Are checkpoints failing? | rate > 0 for 5min → WARNING |
+| Checkpoint size | `flink_jobmanager_job_lastCheckpointSize` | State size growth | Growing unbounded → investigate |
+| Records in/out | `flink_taskmanager_job_task_numRecordsIn` | Throughput per operator | Sudden drop → data issue |
+| Backpressure | Flink Web UI → Job Graph | Operator bottleneck? | Sustained HIGH → scale TMs |
+| Task failures | `flink_jobmanager_job_numRestarts` | Job stability | Frequent restarts → root cause |
+| Watermark lag | `flink_taskmanager_job_task_currentInputWatermark` | Event-time delay | Clock - watermark growing → late data |
+
+**Quick check commands:**
+
+```bash
+# Job status
+kubectl get flinkdeployment -n flink
+
+# Flink REST API — job overview
+kubectl exec -n flink deploy/sql-dashboard -- curl -s localhost:8081/jobs | python3 -m json.tool
+
+# Checkpoint history (replace <JOB_ID> from above)
+kubectl exec -n flink deploy/sql-dashboard -- curl -s localhost:8081/jobs/<JOB_ID>/checkpoints | python3 -m json.tool
+```
+
+**PromQL for Grafana panels:**
+
+```promql
+# Job uptime (should be > 0)
+flink_jobmanager_job_uptime
+
+# Checkpoint duration trend (ms)
+flink_jobmanager_job_lastCheckpointDuration / 1000
+
+# Records processed per second
+rate(flink_taskmanager_job_task_numRecordsIn[1m])
+
+# Number of restarts
+flink_jobmanager_job_numRestarts
+```
+
+#### Pillar 2: Data Pipeline / Event Hubs
+
+| Metric | Source | What it Tells You | Alert Threshold |
+|---|---|---|---|
+| Incoming messages/s | Azure Monitor `IncomingMessages` | Order generation rate | Drop to 0 → generator down |
+| Outgoing messages/s | Azure Monitor `OutgoingMessages` | Consumer read rate | Drop → consumer stuck |
+| Consumer lag | `kafka_consumergroup_lag` (Prometheus) | How far behind Flink is | > 5000 for 3min → WARNING |
+| Throttled requests | Azure Monitor `ThrottledRequests` | Event Hub capacity limit | > 0 for 1min → CRITICAL |
+
+**Check via Azure CLI:**
+
+```bash
+az monitor metrics list \
+  --resource /subscriptions/$(az account show --query id -o tsv)/resourceGroups/prod-eus2-orders-rg/providers/Microsoft.EventHub/namespaces/prodeus2ordersehns \
+  --metric "IncomingMessages,OutgoingMessages,ThrottledRequests" \
+  --interval PT1M --output table
+```
+
+**Azure Portal**: Event Hubs namespace → Metrics → Add `IncomingMessages` split by `EntityName` (topic)
+
+#### Pillar 3: Application Services
+
+| Component | Metric | Source | Alert |
+|---|---|---|---|
+| **Backend** | Request rate | `http_requests_total` | Drop to 0 |
+| **Backend** | p99 latency | `http_request_duration_seconds` | > 500ms for 2min |
+| **Backend** | Error rate | `http_requests_total{status=~"5.."}` | > 1% of total |
+| **Backend** | WebSocket clients | Custom metric | 0 when dashboard is open |
+| **Frontend** | Pod readiness | `kube_pod_status_ready` | Not ready for 1min |
+| **Order Generator** | Orders/sec | `orders_generated_total` | < 5/s (normally 10) |
+| **TimescaleDB** | Connections | `pg_stat_activity` | Near `max_connections` |
+| **TimescaleDB** | Disk usage | PVC metrics | > 80% of 128Gi |
+
+**Quick check commands:**
+
+```bash
+# Backend health & metrics
+kubectl exec -n orders deploy/dashboard-backend -- curl -s localhost:8000/health
+kubectl exec -n orders deploy/dashboard-backend -- curl -s localhost:8000/metrics | head -30
+
+# Order generator metrics
+kubectl exec -n orders deploy/order-generator -- curl -s localhost:8000/metrics | head -30
+
+# TimescaleDB stats
+kubectl exec -n orders timescaledb-0 -- psql -U orders -d orders -c \
+  "SELECT schemaname, relname, n_tup_ins, n_live_tup FROM pg_stat_user_tables ORDER BY n_tup_ins DESC;"
+
+# TimescaleDB disk usage
+kubectl exec -n orders timescaledb-0 -- psql -U orders -d orders -c \
+  "SELECT pg_size_pretty(pg_database_size('orders'));"
+```
+
+#### Pillar 4: Infrastructure / Kubernetes
+
+| Metric | Source | Alert |
 |---|---|---|
-| `FlinkJobNotRunning` | Job ≠ RUNNING for 2 min | critical |
-| `FlinkCheckpointFailing` | Checkpoint failures > 0 for 5 min | warning |
-| `KafkaConsumerLag` | Lag > 5 000 msgs for 3 min | warning |
-| `BackendHighLatency` | p99 latency > 500 ms | warning |
-| `EventHubThrottled` | Throttle errors > 0 for 1 min | critical |
-| `NodeCPUHigh` | CPU > 85% for 5 min | warning |
+| Node CPU | `node_cpu_seconds_total` | > 85% for 5min |
+| Node Memory | `node_memory_MemAvailable_bytes` | < 15% available |
+| Pod restarts | `kube_pod_container_status_restarts_total` | > 3 in 10min |
+| Pod OOMKilled | `kube_pod_container_status_terminated_reason{reason="OOMKilled"}` | Any occurrence |
+| PVC usage | `kubelet_volume_stats_used_bytes` | > 80% capacity |
+| HPA at max | `kube_horizontalpodautoscaler_status_current_replicas` | At max replicas |
+| Pending pods | `kube_pod_status_phase{phase="Pending"}` | > 0 for 5min |
 
-**Grafana dashboards** in `k8s/monitoring/grafana-dashboards/`:
-- `flink-health.json` — job status, checkpoint duration, backpressure
-- `order-analytics.json` — business KPIs (revenue, top products, alert frequency)
+**Quick check commands:**
+
+```bash
+kubectl top nodes
+kubectl top pods -n flink
+kubectl top pods -n orders
+kubectl get hpa -n orders
+kubectl get events -n flink --sort-by='.lastTimestamp' --field-selector type=Warning | tail -10
+kubectl get events -n orders --sort-by='.lastTimestamp' --field-selector type=Warning | tail -10
+kubectl exec -n orders timescaledb-0 -- df -h /var/lib/postgresql/data
+```
+
+### Alert Rules
+
+Defined in `k8s/monitoring/prometheus-rules.yaml`:
+
+| Alert | Condition | Severity | Action |
+|---|---|---|---|
+| `FlinkJobNotRunning` | Uptime == 0 for 2min | **Critical** | Check Flink Web UI, pod logs, restart job |
+| `FlinkCheckpointFailing` | Failure rate > 0 for 5min | Warning | Check ABFS connectivity, state size |
+| `KafkaConsumerLag` | Lag > 5000 for 3min | Warning | Scale TaskManagers, check backpressure |
+| `BackendHighLatency` | p99 > 500ms for 2min | Warning | Check TimescaleDB, scale backend |
+| `NodeCPUHigh` | CPU > 85% for 5min | Warning | Scale node pool, check resource hogs |
+| `EventHubThrottled` | Throttle > 0 for 1min | **Critical** | Upgrade Event Hub TUs, reduce producer rate |
+
+Azure-side alerts (defined in `infra/terraform/monitoring.tf`):
+- **AKS diagnostic settings** → kube-audit + controller-manager logs → Log Analytics
+- **Event Hubs diagnostic settings** → OperationalLogs + AllMetrics → Log Analytics
+- **EventHubThrottled** → Azure Monitor metric alert → email via Action Group
+
+### Grafana Dashboard Panels
+
+#### Dashboard 1: Flink Job Health
+
+| Panel | Type | PromQL |
+|---|---|---|
+| Job Status | Stat (green/red) | `flink_jobmanager_job_uptime > 0` |
+| Checkpoint Duration | Time series | `flink_jobmanager_job_lastCheckpointDuration` |
+| Records In/Out | Time series | `rate(flink_taskmanager_job_task_numRecordsIn[1m])` |
+| Restarts | Stat | `flink_jobmanager_job_numRestarts` |
+| TaskManager Count | Stat | `count(flink_taskmanager_Status_JVM_CPU_Load)` |
+| Backpressure | Heatmap | `flink_taskmanager_job_task_backPressuredTimeMsPerSecond` |
+| JVM Heap | Time series | `flink_taskmanager_Status_JVM_Memory_Heap_Used` |
+| GC Pauses | Time series | `rate(flink_taskmanager_Status_JVM_GarbageCollector_Collection_Time[5m])` |
+
+#### Dashboard 2: Order Analytics (Business KPIs)
+
+| Panel | Type | Source |
+|---|---|---|
+| Orders/min | Time series | `SELECT time_bucket('1m', window_start), SUM(order_count) FROM orders_by_region GROUP BY 1` |
+| Revenue by Region | Stacked bar | `/api/analytics/region` |
+| Top Products | Table | `/api/analytics/products` |
+| High-Value Alerts | Log panel | `/api/analytics/alerts` |
+
+#### Dashboard 3: Infrastructure
+
+| Panel | Type | PromQL |
+|---|---|---|
+| Node CPU | Time series per node | `100 - avg by(node)(rate(node_cpu_seconds_total{mode="idle"}[5m]))*100` |
+| Node Memory | Gauge per node | `node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100` |
+| Pod Restarts | Table | `kube_pod_container_status_restarts_total{namespace=~"flink\|orders"}` |
+| PVC Usage | Gauge | `kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes` |
+| HPA Current/Max | Stat | `kube_horizontalpodautoscaler_status_current_replicas` |
+
+### Azure Log Analytics (KQL Queries)
+
+Access via Azure Portal → `prod-eus2-orders-la` workspace → Logs:
+
+```kusto
+// Container crashes in last 24h
+KubePodInventory
+| where TimeGenerated > ago(24h)
+| where Namespace in ("flink", "orders")
+| where ContainerStatus == "terminated"
+| where ContainerStatusReason == "OOMKilled" or ContainerStatusReason == "Error"
+| project TimeGenerated, Namespace, Name, ContainerStatusReason
+
+// Event Hub throughput by topic
+AzureMetrics
+| where ResourceProvider == "MICROSOFT.EVENTHUB"
+| where MetricName == "IncomingMessages"
+| summarize sum(Total) by bin(TimeGenerated, 1m), Resource
+| render timechart
+
+// AKS audit — who deleted what
+AzureDiagnostics
+| where Category == "kube-audit"
+| where verb_s == "delete"
+| project TimeGenerated, user_username_s, objectRef_resource_s, objectRef_name_s
+```
+
+### Morning Health Check Script
+
+```bash
+#!/bin/bash
+echo "=== Flink Job ==="
+kubectl get flinkdeployment -n flink
+
+echo -e "\n=== All Pods ==="
+kubectl get pods -n flink
+kubectl get pods -n orders
+
+echo -e "\n=== Pod Restarts ==="
+kubectl get pods -n flink -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{range .status.containerStatuses[*]}{.restartCount}{end}{"\n"}{end}'
+kubectl get pods -n orders -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{range .status.containerStatuses[*]}{.restartCount}{end}{"\n"}{end}'
+
+echo -e "\n=== HPA ==="
+kubectl get hpa -n orders
+
+echo -e "\n=== Node Resources ==="
+kubectl top nodes
+
+echo -e "\n=== Warning Events (last 5) ==="
+kubectl get events -n flink --sort-by='.lastTimestamp' --field-selector type=Warning | tail -5
+kubectl get events -n orders --sort-by='.lastTimestamp' --field-selector type=Warning | tail -5
+```
+
+### Troubleshooting Runbook
+
+| Symptom | Check First | Fix |
+|---|---|---|
+| Flink job FAILED | `kubectl logs -n flink <jm-pod> --tail=100` | Check exception, redeploy |
+| Checkpoint timeout | Flink UI → Checkpoints → Duration | Increase timeout, reduce state |
+| High consumer lag | Flink UI → Backpressure tab | Scale TaskManagers, increase parallelism |
+| Backend 5xx errors | `kubectl logs -n orders deploy/dashboard-backend` | Check TimescaleDB connectivity |
+| TimescaleDB slow | `kubectl exec timescaledb-0 -- psql -c "SELECT * FROM pg_stat_activity"` | Check long queries, add indexes |
+| Event Hub throttled | Azure Portal → Event Hub Metrics | Increase throughput units |
+| Node not ready | `kubectl describe node <name>` | Check disk pressure, memory |
+| Pod OOMKilled | `kubectl describe pod <name>` | Increase memory limits |
+| Image pull error | `kubectl describe pod <name>` | Check ACR connectivity, image tag |
+
+### Industry Best Practices
+
+#### SLIs / SLOs (Service Level Indicators / Objectives)
+
+| SLI | Measurement | SLO Target |
+|---|---|---|
+| Data freshness | Time from order generation to dashboard display | < 2 minutes (99.9%) |
+| Flink job availability | % time job status == RUNNING | > 99.5% monthly |
+| Dashboard availability | % successful HTTP responses | > 99.9% monthly |
+| API latency | p99 response time for REST endpoints | < 500ms |
+| Checkpoint success rate | % successful checkpoints | > 99% |
+
+#### Monitoring Methodologies
+
+**RED Method** (for backend service):
+- **R**ate — `rate(http_requests_total[5m])`
+- **E**rrors — `rate(http_requests_total{status=~"5.."}[5m])`
+- **D**uration — `histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))`
+
+**USE Method** (for infrastructure):
+- **U**tilization — CPU%, memory%, disk% per node
+- **S**aturation — queue depth, pending pods, HPA at max
+- **E**rrors — node conditions, OOMKills, evictions
+
+#### Data Retention
+
+| Store | Retention Policy |
+|---|---|
+| Prometheus | 15 days (default kube-prometheus-stack) |
+| TimescaleDB: analytics tables | Compress after 7 days, drop after 90 days |
+| TimescaleDB: high-value alerts | Compress after 30 days, drop after 365 days |
+| Azure Log Analytics | 30 days interactive, 90 days archive |
+
+#### On-Call Escalation
+
+| Severity | Response Time | Who | Channel |
+|---|---|---|---|
+| Critical | 15 min | On-call engineer | PagerDuty + phone |
+| Warning | 1 hour | Team Slack | `#alerts-warning` |
+| Info | Next business day | Team backlog | Grafana annotation |
 
 ---
 
