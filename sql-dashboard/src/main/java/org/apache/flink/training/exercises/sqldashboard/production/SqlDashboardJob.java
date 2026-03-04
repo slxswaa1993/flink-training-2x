@@ -1,5 +1,7 @@
 package org.apache.flink.training.exercises.sqldashboard.production;
 
+import org.apache.flink.configuration.CheckpointingOptions;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 
@@ -19,9 +21,11 @@ public class SqlDashboardJob {
         JobConfig config = new JobConfig();
         KafkaTableFactory factory = new KafkaTableFactory(config);
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        Configuration flinkConf = new Configuration();
+        flinkConf.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY, config.checkpointDir);
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(flinkConf);
         env.enableCheckpointing(60_000);
-        env.getCheckpointConfig().setCheckpointStorage(config.checkpointDir);
 
         StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
 
