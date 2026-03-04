@@ -8,7 +8,7 @@ spec:
   image: REGISTRY/flink-sql-dashboard:latest
   imagePullPolicy: Always
   serviceAccount: flink
-  mode: Application
+  mode: native
   jobManager:
     replicas: 1
     resource:
