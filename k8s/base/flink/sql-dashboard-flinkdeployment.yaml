@@ -24,7 +24,7 @@ spec:
     state.savepoints.dir: "abfs://flink-state@prodeus2ordersstorage.dfs.core.windows.net/savepoints"
     execution.checkpointing.interval: "60s"
     execution.checkpointing.mode: EXACTLY_ONCE
-    kubernetes.taskmanager.node-selector: "pool=flink"
+    kubernetes.taskmanager.node-selector: "pool:flink"
     taskmanager.numberOfTaskSlots: "2"
     parallelism.default: "6"
   podTemplate:

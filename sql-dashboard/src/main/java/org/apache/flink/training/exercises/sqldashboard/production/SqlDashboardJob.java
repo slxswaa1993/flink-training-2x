@@ -3,6 +3,7 @@ package org.apache.flink.training.exercises.sqldashboard.production;
 import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.StatementSet;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 
 /**
@@ -38,8 +39,11 @@ public class SqlDashboardJob {
         tableEnv.executeSql(factory.revenueByCategorySinkDDL());
         tableEnv.executeSql(factory.highValueAlertsSinkDDL());
 
-        // ── Query 1: Orders per minute by region (Tumbling Window) ───────────
-        tableEnv.executeSql("""
+        // ── Bundle all INSERT INTO statements into a single job ─────────────
+        StatementSet stmtSet = tableEnv.createStatementSet();
+
+        // Query 1: Orders per minute by region (Tumbling Window)
+        stmtSet.addInsertSql("""
             INSERT INTO orders_by_region_sink
             SELECT
                 region,
@@ -53,8 +57,8 @@ public class SqlDashboardJob {
                 TUMBLE(orderTime, INTERVAL '1' MINUTE)
             """);
 
-        // ── Query 2: Top 3 selling products (Sliding Window) ─────────────────
-        tableEnv.executeSql("""
+        // Query 2: Top 3 selling products (Sliding Window)
+        stmtSet.addInsertSql("""
             INSERT INTO top_products_sink
             SELECT productName, category, window_start, total_sold, total_revenue, rank_num
             FROM (
@@ -77,8 +81,8 @@ public class SqlDashboardJob {
             WHERE rank_num <= 3
             """);
 
-        // ── Query 3: Revenue trends by category ──────────────────────────────
-        tableEnv.executeSql("""
+        // Query 3: Revenue trends by category
+        stmtSet.addInsertSql("""
             INSERT INTO revenue_by_category_sink
             SELECT
                 category,
@@ -94,8 +98,8 @@ public class SqlDashboardJob {
                 TUMBLE(orderTime, INTERVAL '1' MINUTE)
             """);
 
-        // ── Query 4: High-value order alerts ─────────────────────────────────
-        tableEnv.executeSql("""
+        // Query 4: High-value order alerts
+        stmtSet.addInsertSql("""
             INSERT INTO high_value_alerts_sink
             SELECT
                 orderId,
@@ -108,6 +112,6 @@ public class SqlDashboardJob {
             WHERE totalAmount > 500
             """);
 
-        env.execute("SQL Dashboard Production Job");
+        stmtSet.execute();
     }
 }

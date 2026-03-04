@@ -44,7 +44,7 @@ public class KafkaTableFactory {
                 + ")";
     }
 
-    /** DDL for top-products sink table. */
+    /** DDL for top-products sink table (upsert-kafka because ROW_NUMBER produces changelog). */
     public String topProductsSinkDDL() {
         return "CREATE TABLE top_products_sink (\n"
                 + "  productName   STRING,\n"
@@ -52,9 +52,10 @@ public class KafkaTableFactory {
                 + "  window_start  TIMESTAMP(3),\n"
                 + "  total_sold    BIGINT,\n"
                 + "  total_revenue DOUBLE,\n"
-                + "  rank_num      BIGINT\n"
+                + "  rank_num      BIGINT,\n"
+                + "  PRIMARY KEY (window_start, rank_num) NOT ENFORCED\n"
                 + ") WITH (\n"
-                + kafkaWith("top-products", "latest-offset")
+                + upsertKafkaWith("top-products")
                 + ")";
     }
 
@@ -84,6 +85,18 @@ public class KafkaTableFactory {
                 + ") WITH (\n"
                 + kafkaWith("high-value-alerts", "latest-offset")
                 + ")";
+    }
+
+    private String upsertKafkaWith(String topic) {
+        return "  'connector' = 'upsert-kafka',\n"
+                + "  'topic' = '" + topic + "',\n"
+                + "  'properties.bootstrap.servers' = '" + config.bootstrapServers() + "',\n"
+                + "  'properties.security.protocol' = 'SASL_SSL',\n"
+                + "  'properties.sasl.mechanism' = 'PLAIN',\n"
+                + "  'properties.sasl.jaas.config' = '" + config.saslJaasConfig() + "',\n"
+                + "  'key.format' = 'json',\n"
+                + "  'value.format' = 'json',\n"
+                + "  'value.json.timestamp-format.standard' = 'ISO-8601'\n";
     }
 
     private String kafkaWith(String topic, String startupMode) {
