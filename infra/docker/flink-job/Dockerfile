@@ -17,9 +17,9 @@ RUN chmod +x gradlew && ./gradlew :sql-dashboard:shadowJar --no-daemon -x test
 # Runtime stage — Flink base image
 FROM apache/flink:2.0.0-scala_2.12-java17
 
-# Enable Azure ABFS filesystem plugin for checkpoint/savepoint storage
-RUN mkdir -p /opt/flink/plugins/azure-fs-hadoop && \
-    cp /opt/flink/opt/flink-azure-fs-hadoop-*.jar /opt/flink/plugins/azure-fs-hadoop/
+# Add Azure ABFS filesystem to classpath (not plugins/) so Hadoop's
+# LocalFileSystem is available for checkpoint metadata temp files
+RUN cp /opt/flink/opt/flink-azure-fs-hadoop-*.jar /opt/flink/lib/
 
 # Copy the fat JAR to the Flink user-library directory
 COPY --from=builder \

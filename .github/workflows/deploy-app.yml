@@ -50,25 +50,6 @@ jobs:
           TAG="${{ github.event.inputs.image_tag || github.sha }}"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Inject Azure Storage key into Hadoop ConfigMaps
-        run: |
-          STORAGE_KEY=$(az storage account keys list \
-            --account-name prodeus2ordersstorage \
-            --resource-group $AKS_RESOURCE_GROUP \
-            --query '[0].value' -o tsv)
-
-          for CM_NAME in hadoop-config hadoop-config-sql-dashboard; do
-            kubectl create configmap $CM_NAME -n flink \
-              --from-literal=core-site.xml="<?xml version=\"1.0\"?>
-          <configuration>
-            <property>
-              <name>fs.azure.account.key.prodeus2ordersstorage.dfs.core.windows.net</name>
-              <value>${STORAGE_KEY}</value>
-            </property>
-          </configuration>" \
-              --dry-run=client -o yaml | kubectl apply -f -
-          done
-
       - name: Apply Kustomize base
         run: kubectl apply -k k8s/overlays/production --server-side --force-conflicts
 
@@ -86,7 +67,7 @@ jobs:
           STORAGE_KEY=$(az storage account keys list \
             --account-name prodeus2ordersstorage \
             --resource-group $AKS_RESOURCE_GROUP \
-            --query '[0].value' -o tsv)
+            --query '[0].value' -o tsv | tr -d '[:space:]')
 
           kubectl patch flinkdeployment sql-dashboard -n flink \
             --type='json' \

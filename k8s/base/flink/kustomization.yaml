@@ -5,5 +5,4 @@ namespace: flink
 
 resources:
   - rbac.yaml
-  - hadoop-config.yaml
   - sql-dashboard-flinkdeployment.yaml
