@@ -78,7 +78,7 @@ class Order(BaseModel):
             quantity=quantity,
             unitPrice=unit_price,
             totalAmount=round(quantity * unit_price, 2),
-            orderTime=now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            orderTime=now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3],
             status=status,
         )
 
