@@ -51,7 +51,7 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Apply Kustomize base
-        run: kubectl apply -k k8s/overlays/production --server-side
+        run: kubectl apply -k k8s/overlays/production --server-side --force-conflicts
 
       - name: Patch image tags
         run: |
