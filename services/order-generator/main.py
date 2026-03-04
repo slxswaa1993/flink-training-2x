@@ -43,6 +43,7 @@ def make_producer(cfg: Config) -> Producer:
             "sasl.mechanism": "PLAIN",
             "sasl.username": "$ConnectionString",
             "sasl.password": cfg.sasl_password,
+            "enable.idempotence": False,
             "linger.ms": 5,
             "batch.size": 32768,
             "compression.type": "lz4",

@@ -94,6 +94,7 @@ public class KafkaTableFactory {
                 + "  'properties.security.protocol' = 'SASL_SSL',\n"
                 + "  'properties.sasl.mechanism' = 'PLAIN',\n"
                 + "  'properties.sasl.jaas.config' = '" + config.saslJaasConfig() + "',\n"
+                + "  'properties.enable.idempotence' = 'false',\n"
                 + "  'key.format' = 'json',\n"
                 + "  'value.format' = 'json',\n"
                 + "  'value.json.timestamp-format.standard' = 'ISO-8601'\n";
@@ -107,6 +108,7 @@ public class KafkaTableFactory {
                 + "  'properties.security.protocol' = 'SASL_SSL',\n"
                 + "  'properties.sasl.mechanism' = 'PLAIN',\n"
                 + "  'properties.sasl.jaas.config' = '" + config.saslJaasConfig() + "',\n"
+                + "  'properties.enable.idempotence' = 'false',\n"
                 + "  'scan.startup.mode' = '" + startupMode + "',\n"
                 + "  'format' = 'json',\n"
                 + "  'json.timestamp-format.standard' = 'ISO-8601'\n";
