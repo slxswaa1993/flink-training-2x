@@ -3,7 +3,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import type { WsMessage } from '@/types/analytics'
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:8000'
+function getWsUrl() {
+  if (typeof window === 'undefined') return 'ws://localhost:8000'
+  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${proto}//${window.location.host}`
+}
 const RECONNECT_DELAY_MS = 3000
 const MAX_RECONNECT_DELAY_MS = 30000
 
@@ -19,7 +24,7 @@ export function useAnalyticsStream(onMessage: (msg: WsMessage) => void) {
 
   const connect = useCallback(() => {
     setStatus('connecting')
-    const ws = new WebSocket(`${WS_URL}/ws/stream`)
+    const ws = new WebSocket(`${getWsUrl()}/ws/stream`)
     wsRef.current = ws
 
     ws.onopen = () => {

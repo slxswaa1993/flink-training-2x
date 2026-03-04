@@ -2,12 +2,15 @@
 
 import useSWR from 'swr'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+function getApiUrl() {
+  if (typeof window === 'undefined') return ''
+  return process.env.NEXT_PUBLIC_API_URL || `${window.location.protocol}//${window.location.host}`
+}
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 export function useHistoricalData<T>(path: string, refreshIntervalMs = 30_000) {
-  return useSWR<T[]>(`${API_URL}${path}`, fetcher, {
+  return useSWR<T[]>(`${getApiUrl()}${path}`, fetcher, {
     refreshInterval: refreshIntervalMs,
     revalidateOnFocus: false,
   })
