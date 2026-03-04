@@ -27,7 +27,7 @@ public class KafkaTableFactory {
                 + "  status      STRING,\n"
                 + "  WATERMARK FOR orderTime AS orderTime - INTERVAL '5' SECOND\n"
                 + ") WITH (\n"
-                + kafkaWith("orders-raw", "earliest-offset")
+                + kafkaWith("orders-raw", "latest-offset")
                 + ")";
     }
 
