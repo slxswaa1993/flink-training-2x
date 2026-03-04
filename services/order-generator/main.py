@@ -46,7 +46,7 @@ def make_producer(cfg: Config) -> Producer:
             "enable.idempotence": False,
             "linger.ms": 5,
             "batch.size": 32768,
-            "compression.type": "lz4",
+            "compression.type": "gzip",
         }
     )
 
