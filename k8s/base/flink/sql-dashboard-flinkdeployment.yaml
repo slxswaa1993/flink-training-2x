@@ -24,6 +24,7 @@ spec:
     state.savepoints.dir: "abfs://flink-state@prodeus2ordersstorage.dfs.core.windows.net/savepoints"
     execution.checkpointing.interval: "60s"
     execution.checkpointing.mode: EXACTLY_ONCE
+    env.hadoop.conf.dir: "/opt/hadoop-conf"
     kubernetes.taskmanager.node-selector: "pool:flink"
     taskmanager.numberOfTaskSlots: "2"
     parallelism.default: "6"
@@ -42,6 +43,15 @@ spec:
                 secretKeyRef:
                   name: eventhub-secrets
                   key: connection-string
+            - name: HADOOP_CONF_DIR
+              value: "/opt/hadoop-conf"
+          volumeMounts:
+            - name: hadoop-config
+              mountPath: /opt/hadoop-conf
+      volumes:
+        - name: hadoop-config
+          configMap:
+            name: hadoop-config
   job:
     jarURI: local:///opt/flink/usrlib/sql-dashboard-production.jar
     entryClass: org.apache.flink.training.exercises.sqldashboard.production.SqlDashboardJob
