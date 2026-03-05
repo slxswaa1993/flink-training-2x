@@ -1,3 +1,5 @@
+import ssl
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +30,7 @@ class Settings(BaseSettings):
             "sasl_mechanism": "PLAIN",
             "sasl_plain_username": "$ConnectionString",
             "sasl_plain_password": self.eventhub_conn_string,
+            "ssl_context": ssl.create_default_context(),
         }
 
 
